@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -7,7 +7,6 @@ import { Button } from '@/components/ui/button';
 import { Slider } from '@/components/ui/slider';
 import { rgbToCIELab, cieLab2rgb } from './utils/colorUtils';
 import { deltaE2000 } from './utils/deltaE';
-import { ColorSwatchDatabase, ColorSwatchWithDistance } from './utils/ColorSwatchDatabase';
 
 const ripSoftwarePresets = {
   'dtfrip': { name: 'DTFRIP', profile: 'sRGB', whiteInkAdjustment: 1.1 },
@@ -29,17 +28,24 @@ const designSoftwarePresets = {
   'other': { name: 'Other / Custom', colorSpace: 'Custom' },
 };
 
+interface ColorSwatch {
+  name: string;
+  hex: string;
+  rgb: [number, number, number];
+  count: number;
+  percentage: number;
+}
+
 const ColorMatcher: React.FC = () => {
-  const [rgb, setRgb] = useState({ r: 128, g: 128, b: 128 });
-  const [cmyk, setCmyk] = useState({ c: 0, m: 0, y: 0, k: 50 });
+  const [rgb, setRgb] = useState({ r: 255, g: 0, b: 0 }); // Start with bright red for testing
+  const [cmyk, setCmyk] = useState({ c: 0, m: 100, y: 100, k: 0 });
   const [ripSoftware, setRipSoftware] = useState('dtfrip');
   const [designSoftware, setDesignSoftware] = useState('photoshop');
-  const [colorName, setColorName] = useState('Gray');
+  const [colorName, setColorName] = useState('');
   const [calibrationFactor, setCalibrationFactor] = useState(0);
   const [customProfile, setCustomProfile] = useState<string | null>(null);
   const [customSettings, setCustomSettings] = useState('');
-  const [database, setDatabase] = useState<ColorSwatchDatabase | null>(null);
-  const [nearestSwatches, setNearestSwatches] = useState<ColorSwatchWithDistance[]>([]);
+  const [nearestSwatches, setNearestSwatches] = useState<ColorSwatch[]>([]);
 
   const rgbToCmyk = (r: number, g: number, b: number) => {
     r = r / 255;
@@ -76,60 +82,39 @@ const ColorMatcher: React.FC = () => {
     };
   };
 
-  const getColorName = (r: number, g: number, b: number) => {
-    const colorNames = [
-      { r: 255, g: 0, b: 0, name: 'Red' },
-      { r: 0, g: 255, b: 0, name: 'Green' },
-      { r: 0, g: 0, b: 255, name: 'Blue' },
-      { r: 255, g: 255, b: 0, name: 'Yellow' },
-      { r: 255, g: 0, b: 255, name: 'Magenta' },
-      { r: 0, g: 255, b: 255, name: 'Cyan' },
-      { r: 255, g: 255, b: 255, name: 'White' },
-      { r: 0, g: 0, b: 0, name: 'Black' },
-      { r: 128, g: 128, b: 128, name: 'Gray' },
-    ];
-
-    const closestColor = colorNames.reduce((prev, curr) => {
-      const prevDiff = Math.abs(prev.r - r) + Math.abs(prev.g - g) + Math.abs(prev.b - b);
-      const currDiff = Math.abs(curr.r - r) + Math.abs(curr.g - g) + Math.abs(curr.b - b);
-      return prevDiff < currDiff ? prev : curr;
-    });
-    return closestColor.name;
-  };
-
   useEffect(() => {
-    // Load color swatch database
-    const loadDatabase = async () => {
+    const loadColorSwatches = async () => {
       try {
-        const response = await fetch('/api/color-swatches');
+        const response = await fetch('/data/color_swatches.json');
         const data = await response.json();
-        setDatabase(ColorSwatchDatabase.importFromJSON(JSON.stringify(data)));
+        console.log('Loaded color swatches:', data.slice(0, 5)); // Log first 5 swatches
+        setNearestSwatches(data.slice(0, 5)); // Initially set the first 5 swatches
+        setColorName(data[0].name); // Set the first color name
       } catch (error) {
         console.error('Failed to load color swatch database:', error);
       }
     };
-    loadDatabase();
+    loadColorSwatches();
   }, []);
 
-  useEffect(() => {
-    if (database) {
-      findNearestSwatches();
-    }
-  }, [rgb, database]);
-
-  const findNearestSwatches = () => {
-    if (!database) return;
+  const findNearestSwatches = useCallback(() => {
+    if (nearestSwatches.length === 0) return;
 
     const labColor = rgbToCIELab(rgb.r, rgb.g, rgb.b);
-    const nearest = database.findNearestSwatches(labColor, 5);
-    setNearestSwatches(nearest);
-  };
+    const swatchesWithDistance = nearestSwatches.map(swatch => ({
+      ...swatch,
+      distance: deltaE2000(labColor, rgbToCIELab(swatch.rgb[0], swatch.rgb[1], swatch.rgb[2]))
+    }));
+
+    const sortedSwatches = swatchesWithDistance.sort((a, b) => a.distance - b.distance);
+    console.log('Nearest swatches:', sortedSwatches.slice(0, 5));
+    setNearestSwatches(sortedSwatches.slice(0, 5));
+    setColorName(sortedSwatches[0].name);
+  }, [rgb, nearestSwatches]);
 
   useEffect(() => {
-    const newCmyk = rgbToCmyk(rgb.r, rgb.g, rgb.b);
-    setCmyk(newCmyk);
-    setColorName(getColorName(rgb.r, rgb.g, rgb.b));
-  }, [rgb]);
+    findNearestSwatches();
+  }, [rgb, findNearestSwatches]);
 
   const handleRgbChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
@@ -163,19 +148,15 @@ const ColorMatcher: React.FC = () => {
   const handleProfileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      // Here you would implement the logic to parse and apply the ICC profile
-      // For now, we'll just store the file name
       setCustomProfile(file.name);
     }
   };
 
   const handleCustomSettingsChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setCustomSettings(e.target.value);
-    // Here you would implement the logic to parse and apply custom settings
   };
 
   const handleConvert = () => {
-    // Implement conversion logic here
     console.log('Converting with', ripSoftware, 'and', designSoftware);
     console.log('Custom settings:', customSettings);
     console.log('Calibration factor:', calibrationFactor);
@@ -243,8 +224,11 @@ const ColorMatcher: React.FC = () => {
             onValueChange={handleCalibrationChange}
             className="w-full"
             style={{
-              '--slider-bg': '#E5E7EB', // Light gray background
-              '--slider-track': '#4B5563', // Darker track color
+              '--slider-bg': '#E5E7EB',
+              '--slider-track': '#4B5563',
+              '--slider-range': '#3B82F6',
+              '--slider-thumb': '#2563EB',
+              '--slider-thumb-focus': '#1D4ED8',
             } as React.CSSProperties}
           />
           <div className="text-sm text-center mt-1 text-gray-600">
@@ -314,12 +298,12 @@ const ColorMatcher: React.FC = () => {
           <div className="mt-6">
             <h3 className="text-lg font-semibold mb-2">Nearest Color Swatches:</h3>
             {nearestSwatches.map((swatch, index) => (
-              <div key={swatch.id} className="flex items-center mb-2">
+              <div key={index} className="flex items-center mb-2">
                 <div 
                   className="w-8 h-8 mr-2 border border-gray-300" 
                   style={{ backgroundColor: `rgb(${swatch.rgb[0]}, ${swatch.rgb[1]}, ${swatch.rgb[2]})` }}
                 ></div>
-                <span>{swatch.name} (Delta E: {swatch.distance.toFixed(2)})</span>
+                <span>{swatch.name} (RGB: {swatch.rgb.join(', ')})</span>
               </div>
             ))}
           </div>
