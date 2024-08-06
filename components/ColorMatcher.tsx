@@ -32,6 +32,7 @@ interface ColorSwatch {
   name: string;
   hex: string;
   rgb: [number, number, number];
+  cmyk: [number, number, number, number];
   count: number;
   percentage: number;
 }
@@ -45,42 +46,8 @@ const ColorMatcher: React.FC = () => {
   const [calibrationFactor, setCalibrationFactor] = useState(0);
   const [customProfile, setCustomProfile] = useState<string | null>(null);
   const [customSettings, setCustomSettings] = useState('');
+  const [colorSwatches, setColorSwatches] = useState<ColorSwatch[]>([]);
   const [nearestSwatches, setNearestSwatches] = useState<ColorSwatch[]>([]);
-
-  const rgbToCmyk = (r: number, g: number, b: number) => {
-    r = r / 255;
-    g = g / 255;
-    b = b / 255;
-
-    let k = 1 - Math.max(r, g, b);
-    let c = k === 1 ? 0 : (1 - r - k) / (1 - k);
-    let m = k === 1 ? 0 : (1 - g - k) / (1 - k);
-    let y = k === 1 ? 0 : (1 - b - k) / (1 - k);
-
-    return {
-      c: Math.round(c * 100),
-      m: Math.round(m * 100),
-      y: Math.round(y * 100),
-      k: Math.round(k * 100)
-    };
-  };
-
-  const cmykToRgb = (c: number, m: number, y: number, k: number) => {
-    c = c / 100;
-    m = m / 100;
-    y = y / 100;
-    k = k / 100;
-
-    let r = 1 - Math.min(1, c * (1 - k) + k);
-    let g = 1 - Math.min(1, m * (1 - k) + k);
-    let b = 1 - Math.min(1, y * (1 - k) + k);
-
-    return {
-      r: Math.round(r * 255),
-      g: Math.round(g * 255),
-      b: Math.round(b * 255)
-    };
-  };
 
   useEffect(() => {
     const loadColorSwatches = async () => {
@@ -88,8 +55,7 @@ const ColorMatcher: React.FC = () => {
         const response = await fetch('/data/color_swatches.json');
         const data = await response.json();
         console.log('Loaded color swatches:', data.slice(0, 5)); // Log first 5 swatches
-        setNearestSwatches(data.slice(0, 5)); // Initially set the first 5 swatches
-        setColorName(data[0].name); // Set the first color name
+        setColorSwatches(data);
       } catch (error) {
         console.error('Failed to load color swatch database:', error);
       }
@@ -98,10 +64,10 @@ const ColorMatcher: React.FC = () => {
   }, []);
 
   const findNearestSwatches = useCallback(() => {
-    if (nearestSwatches.length === 0) return;
+    if (colorSwatches.length === 0) return;
 
     const labColor = rgbToCIELab(rgb.r, rgb.g, rgb.b);
-    const swatchesWithDistance = nearestSwatches.map(swatch => ({
+    const swatchesWithDistance = colorSwatches.map(swatch => ({
       ...swatch,
       distance: deltaE2000(labColor, rgbToCIELab(swatch.rgb[0], swatch.rgb[1], swatch.rgb[2]))
     }));
@@ -109,8 +75,12 @@ const ColorMatcher: React.FC = () => {
     const sortedSwatches = swatchesWithDistance.sort((a, b) => a.distance - b.distance);
     console.log('Nearest swatches:', sortedSwatches.slice(0, 5));
     setNearestSwatches(sortedSwatches.slice(0, 5));
-    setColorName(sortedSwatches[0].name);
-  }, [rgb, nearestSwatches]);
+    
+    const nearestSwatch = sortedSwatches[0];
+    setRgb({ r: nearestSwatch.rgb[0], g: nearestSwatch.rgb[1], b: nearestSwatch.rgb[2] });
+    setCmyk({ c: nearestSwatch.cmyk[0], m: nearestSwatch.cmyk[1], y: nearestSwatch.cmyk[2], k: nearestSwatch.cmyk[3] });
+    setColorName(nearestSwatch.name);
+  }, [rgb, colorSwatches]);
 
   useEffect(() => {
     findNearestSwatches();
@@ -126,10 +96,24 @@ const ColorMatcher: React.FC = () => {
 
   const handleCmykChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
-    const newCmyk = { ...cmyk, [name]: Math.max(0, Math.min(100, parseInt(value) || 0)) };
+    const newCmyk = { ...cmyk, [name]: Math.max(0, Math.min(100, parseFloat(value) || 0)) };
     setCmyk(newCmyk);
-    const newRgb = cmykToRgb(newCmyk.c, newCmyk.m, newCmyk.y, newCmyk.k);
-    setRgb(newRgb);
+    // Convert CMYK to RGB and update
+    const [r, g, b] = cmykToRgb(newCmyk.c, newCmyk.m, newCmyk.y, newCmyk.k);
+    setRgb({ r, g, b });
+  };
+
+  const cmykToRgb = (c: number, m: number, y: number, k: number): [number, number, number] => {
+    c /= 100;
+    m /= 100;
+    y /= 100;
+    k /= 100;
+
+    const r = 255 * (1 - c) * (1 - k);
+    const g = 255 * (1 - m) * (1 - k);
+    const b = 255 * (1 - y) * (1 - k);
+
+    return [Math.round(r), Math.round(g), Math.round(b)];
   };
 
   const handleCalibrationChange = (value: number[]) => {
@@ -161,6 +145,11 @@ const ColorMatcher: React.FC = () => {
     console.log('Custom settings:', customSettings);
     console.log('Calibration factor:', calibrationFactor);
     console.log('Custom profile:', customProfile);
+    console.log('Final RGB:', rgb);
+    console.log('Final CMYK:', cmyk);
+    console.log('Final Color Name:', colorName);
+    // Here you would implement the actual color conversion logic
+    // based on the selected software profiles and settings
   };
 
   return (
@@ -288,6 +277,7 @@ const ColorMatcher: React.FC = () => {
                 onChange={handleCmykChange}
                 min="0"
                 max="100"
+                step="0.1"
                 className="w-full border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
               />
             </div>
@@ -303,7 +293,7 @@ const ColorMatcher: React.FC = () => {
                   className="w-8 h-8 mr-2 border border-gray-300" 
                   style={{ backgroundColor: `rgb(${swatch.rgb[0]}, ${swatch.rgb[1]}, ${swatch.rgb[2]})` }}
                 ></div>
-                <span>{swatch.name} (RGB: {swatch.rgb.join(', ')})</span>
+                <span>{swatch.name} (RGB: {swatch.rgb.join(', ')}, CMYK: {swatch.cmyk.map(v => v.toFixed(2)).join(', ')})</span>
               </div>
             ))}
           </div>
