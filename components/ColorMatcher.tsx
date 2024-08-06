@@ -37,9 +37,11 @@ interface ColorSwatch {
   percentage: number;
 }
 
+type ColorValue = number | '';
+
 const ColorMatcher: React.FC = () => {
-  const [rgb, setRgb] = useState({ r: 255, g: 0, b: 0 });
-  const [cmyk, setCmyk] = useState({ c: 0, m: 100, y: 100, k: 0 });
+  const [rgb, setRgb] = useState<{ r: ColorValue; g: ColorValue; b: ColorValue }>({ r: 255, g: 0, b: 0 });
+  const [cmyk, setCmyk] = useState<{ c: ColorValue; m: ColorValue; y: ColorValue; k: ColorValue }>({ c: 0, m: 100, y: 100, k: 0 });
   const [ripSoftware, setRipSoftware] = useState('dtfrip');
   const [designSoftware, setDesignSoftware] = useState('photoshop');
   const [colorName, setColorName] = useState('');
@@ -50,28 +52,23 @@ const ColorMatcher: React.FC = () => {
   const [nearestSwatches, setNearestSwatches] = useState<ColorSwatch[]>([]);
 
   const rgbToCmyk = (r: number, g: number, b: number): [number, number, number, number] => {
-    let c = 1 - (r / 255);
-    let m = 1 - (g / 255);
-    let y = 1 - (b / 255);
-    let k = Math.min(c, m, y);
+    r = r / 255;
+    g = g / 255;
+    b = b / 255;
 
-    if (k === 1) {
-      return [0, 0, 0, 100];
-    }
+    let k = 1 - Math.max(r, g, b);
+    let c = k === 1 ? 0 : (1 - r - k) / (1 - k);
+    let m = k === 1 ? 0 : (1 - g - k) / (1 - k);
+    let y = k === 1 ? 0 : (1 - b - k) / (1 - k);
 
-    c = ((c - k) / (1 - k)) * 100;
-    m = ((m - k) / (1 - k)) * 100;
-    y = ((y - k) / (1 - k)) * 100;
-    k = k * 100;
-
-    return [c, m, y, k];
+    return [c * 100, m * 100, y * 100, k * 100];
   };
 
   const cmykToRgb = (c: number, m: number, y: number, k: number): [number, number, number] => {
-    c /= 100;
-    m /= 100;
-    y /= 100;
-    k /= 100;
+    c = c / 100;
+    m = m / 100;
+    y = y / 100;
+    k = k / 100;
 
     let r = 255 * (1 - c) * (1 - k);
     let g = 255 * (1 - m) * (1 - k);
@@ -95,9 +92,9 @@ const ColorMatcher: React.FC = () => {
   }, []);
 
   const findNearestSwatches = useCallback(() => {
-    if (colorSwatches.length === 0) return;
+    if (colorSwatches.length === 0 || Object.values(rgb).some(value => value === '')) return;
 
-    const labColor = rgbToCIELab(rgb.r, rgb.g, rgb.b);
+    const labColor = rgbToCIELab(Number(rgb.r), Number(rgb.g), Number(rgb.b));
     const swatchesWithDistance = colorSwatches.map(swatch => ({
       ...swatch,
       distance: deltaE2000(labColor, rgbToCIELab(swatch.rgb[0], swatch.rgb[1], swatch.rgb[2]))
@@ -113,22 +110,37 @@ const ColorMatcher: React.FC = () => {
   }, [rgb, findNearestSwatches]);
 
   useEffect(() => {
-    const [c, m, y, k] = rgbToCmyk(rgb.r, rgb.g, rgb.b);
-    setCmyk({ c, m, y, k });
+    if (Object.values(rgb).every(value => value !== '')) {
+      const [c, m, y, k] = rgbToCmyk(Number(rgb.r), Number(rgb.g), Number(rgb.b));
+      setCmyk({ c, m, y, k });
+    }
   }, [rgb]);
+
+  useEffect(() => {
+    if (Object.values(cmyk).every(value => value !== '')) {
+      const [r, g, b] = cmykToRgb(Number(cmyk.c), Number(cmyk.m), Number(cmyk.y), Number(cmyk.k));
+      setRgb({ r, g, b });
+    }
+  }, [cmyk]);
 
   const handleRgbChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
-    const newValue = Math.max(0, Math.min(255, parseInt(value) || 0));
-    setRgb(prev => ({ ...prev, [name]: newValue }));
+    if (value === '') {
+      setRgb(prev => ({ ...prev, [name]: '' }));
+    } else {
+      const newValue = Math.max(0, Math.min(255, parseInt(value) || 0));
+      setRgb(prev => ({ ...prev, [name]: newValue }));
+    }
   };
 
   const handleCmykChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
-    const newCmyk = { ...cmyk, [name]: Math.max(0, Math.min(100, parseFloat(value) || 0)) };
-    setCmyk(newCmyk);
-    const [r, g, b] = cmykToRgb(newCmyk.c, newCmyk.m, newCmyk.y, newCmyk.k);
-    setRgb({ r, g, b });
+    if (value === '') {
+      setCmyk(prev => ({ ...prev, [name]: '' }));
+    } else {
+      const newValue = Math.max(0, Math.min(100, parseFloat(value) || 0));
+      setCmyk(prev => ({ ...prev, [name]: newValue }));
+    }
   };
 
   const handleCalibrationChange = (value: number[]) => {
@@ -138,9 +150,9 @@ const ColorMatcher: React.FC = () => {
 
   const applyCalibration = (factor: number) => {
     setRgb(prev => ({
-      r: Math.max(0, Math.min(255, prev.r + factor)),
-      g: Math.max(0, Math.min(255, prev.g + factor)),
-      b: Math.max(0, Math.min(255, prev.b + factor))
+      r: Math.max(0, Math.min(255, Number(prev.r) + factor)),
+      g: Math.max(0, Math.min(255, Number(prev.g) + factor)),
+      b: Math.max(0, Math.min(255, Number(prev.b) + factor))
     }));
   };
 
@@ -257,13 +269,11 @@ const ColorMatcher: React.FC = () => {
             <div key={color}>
               <Label htmlFor={color} className="block text-sm font-medium text-gray-700 mb-1">{color.toUpperCase()}</Label>
               <Input
-                type="number"
+                type="text"
                 id={color}
                 name={color}
                 value={rgb[color as keyof typeof rgb]}
                 onChange={handleRgbChange}
-                min="0"
-                max="255"
                 className="w-full border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
               />
             </div>
@@ -285,14 +295,11 @@ const ColorMatcher: React.FC = () => {
             <div key={color}>
               <Label htmlFor={color} className="block text-sm font-medium text-gray-700 mb-1">{color.toUpperCase()}</Label>
               <Input
-                type="number"
+                type="text"
                 id={color}
                 name={color}
-                value={cmyk[color as keyof typeof cmyk].toFixed(2)}
+                value={cmyk[color as keyof typeof cmyk]}
                 onChange={handleCmykChange}
-                min="0"
-                max="100"
-                step="0.01"
                 className="w-full border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
               />
             </div>
