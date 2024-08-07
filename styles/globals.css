@@ -1,3 +1,7 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+.slider {
+    --slider-track: #4B5563 !important; /* Add !important to enforce the value */
+  }
