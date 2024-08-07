@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Slider } from '@/components/ui/slider';
 import * as ColorUtils from './utils/colorUtils';
 import { deltaE2000 } from './utils/deltaE';
+import ImageColorDetector from './ImageColorDetector';
 
 const ripSoftwarePresets = {
   'dtfrip': { name: 'DTFRIP', profile: 'sRGB', whiteInkAdjustment: 1.1 },
@@ -39,41 +40,6 @@ interface ColorSwatch {
 
 type ColorValue = number | '';
 
-const ImageColorDetector: React.FC<{ imageUrl: string; onColorSelect: (color: { r: number; g: number; b: number }) => void }> = ({ imageUrl, onColorSelect }) => {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    const ctx = canvas?.getContext('2d');
-    if (canvas && ctx) {
-      const img = new Image();
-      img.src = imageUrl;
-      img.onload = () => {
-        canvas.width = img.width;
-        canvas.height = img.height;
-        ctx.drawImage(img, 0, 0);
-      };
-    }
-  }, [imageUrl]);
-
-  const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    const canvas = canvasRef.current;
-    const ctx = canvas?.getContext('2d');
-    if (canvas && ctx) {
-      const rect = canvas.getBoundingClientRect();
-      const x = e.clientX - rect.left;
-      const y = e.clientY - rect.top;
-      const imageData = ctx.getImageData(x, y, 1, 1);
-      const r = imageData.data[0];
-      const g = imageData.data[1];
-      const b = imageData.data[2];
-      onColorSelect({ r, g, b });
-    }
-  };
-
-  return <canvas ref={canvasRef} onClick={handleCanvasClick} style={{ maxWidth: '100%', height: 'auto' }} />;
-};
-
 const ColorMatcher: React.FC = () => {
   const [rgb, setRgb] = useState<{ r: ColorValue; g: ColorValue; b: ColorValue }>({ r: 255, g: 0, b: 0 });
   const [cmyk, setCmyk] = useState<{ c: ColorValue; m: ColorValue; y: ColorValue; k: ColorValue }>({ c: 0, m: 100, y: 100, k: 0 });
@@ -103,13 +69,13 @@ const ColorMatcher: React.FC = () => {
 
   const findNearestSwatches = useCallback(() => {
     if (colorSwatches.length === 0 || Object.values(rgb).some(value => value === '')) return;
-  
+
     const labColor = ColorUtils.rgbToCIELab(Number(rgb.r), Number(rgb.g), Number(rgb.b));
     const swatchesWithDistance = colorSwatches.map(swatch => ({
       ...swatch,
       distance: deltaE2000(labColor, ColorUtils.rgbToCIELab(swatch.rgb[0], swatch.rgb[1], swatch.rgb[2]))
     }));
-  
+
     const sortedSwatches = swatchesWithDistance.sort((a, b) => a.distance - b.distance);
     setNearestSwatches(sortedSwatches.slice(0, 5));
     setColorName(sortedSwatches[0].name);
@@ -125,7 +91,7 @@ const ColorMatcher: React.FC = () => {
       setCmyk({ c, m, y, k });
     }
   }, [rgb]);
-  
+
   useEffect(() => {
     if (Object.values(cmyk).every(value => value !== '')) {
       const [r, g, b] = ColorUtils.cmykToRgb(Number(cmyk.c), Number(cmyk.m), Number(cmyk.y), Number(cmyk.k));
@@ -185,6 +151,15 @@ const ColorMatcher: React.FC = () => {
         setUploadedImage(event.target?.result as string);
       };
       reader.readAsDataURL(file);
+    }
+  };
+
+  const handleRemoveImage = () => {
+    setUploadedImage(null);
+    // Reset the file input
+    const fileInput = document.getElementById('imageUpload') as HTMLInputElement;
+    if (fileInput) {
+      fileInput.value = '';
     }
   };
 
@@ -328,14 +303,26 @@ const ColorMatcher: React.FC = () => {
         </div>
 
         <div>
-          <Label htmlFor="imageUpload" className="block text-sm font-medium text-gray-700 mb-1">Upload Image for Color Detection</Label>
-          <Input
-            id="imageUpload"
-            type="file"
-            accept="image/*"
-            onChange={handleImageUpload}
-            className="w-full border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
-          />
+          <Label htmlFor="imageUpload" className="block text-sm font-medium text-gray-700 mb-1">
+            Upload Image for Color Detection
+          </Label>
+          <div className="flex items-center space-x-2">
+            <Input
+              id="imageUpload"
+              type="file"
+              accept="image/*"
+              onChange={handleImageUpload}
+              className="w-full border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
+            />
+            {uploadedImage && (
+              <Button
+                onClick={handleRemoveImage}
+                className="bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded"
+              >
+                Remove
+              </Button>
+            )}
+          </div>
         </div>
 
         {uploadedImage && (
@@ -343,9 +330,13 @@ const ColorMatcher: React.FC = () => {
             <h3 className="text-lg font-semibold mb-2">Detect Colors from Image</h3>
             <ImageColorDetector
               imageUrl={uploadedImage}
-              onColorSelect={(color) => setRgb(color)}
+              onColorSelect={(color) => {
+                setRgb(color);
+                const [c, m, y, k] = ColorUtils.rgbToCmyk(color.r, color.g, color.b);
+                setCmyk({ c, m, y, k });
+              }}
             />
-            <p className="text-sm mt-2">Click on the image to select a color</p>
+            <p className="text-sm mt-2">Hover over the image to magnify, click to select a color</p>
           </div>
         )}
 
