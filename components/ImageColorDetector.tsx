@@ -9,6 +9,7 @@ const ImageColorDetector: React.FC<ImageColorDetectorProps> = ({ imageUrl, onCol
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [magnifierPos, setMagnifierPos] = useState({ x: -1, y: -1 });
   const [selectedPos, setSelectedPos] = useState({ x: -1, y: -1 });
+  const [imageDimensions, setImageDimensions] = useState({ width: 0, height: 0 });
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -17,6 +18,7 @@ const ImageColorDetector: React.FC<ImageColorDetectorProps> = ({ imageUrl, onCol
       const img = new Image();
       img.src = imageUrl;
       img.onload = () => {
+        setImageDimensions({ width: img.width, height: img.height });
         canvas.width = img.width;
         canvas.height = img.height;
         ctx.drawImage(img, 0, 0);
@@ -31,8 +33,8 @@ const ImageColorDetector: React.FC<ImageColorDetectorProps> = ({ imageUrl, onCol
       const rect = canvas.getBoundingClientRect();
       const scaleX = canvas.width / rect.width;
       const scaleY = canvas.height / rect.height;
-      const actualX = Math.floor((x - rect.left) * scaleX);
-      const actualY = Math.floor((y - rect.top) * scaleY);
+      const actualX = Math.floor(x * scaleX);
+      const actualY = Math.floor(y * scaleY);
       const imageData = ctx.getImageData(actualX, actualY, 1, 1);
       return {
         r: imageData.data[0],
@@ -43,27 +45,35 @@ const ImageColorDetector: React.FC<ImageColorDetectorProps> = ({ imageUrl, onCol
     return { r: 0, g: 0, b: 0 };
   };
 
-  const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    setMagnifierPos({ x: e.nativeEvent.offsetX, y: e.nativeEvent.offsetY });
+  const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    setMagnifierPos({ x, y });
   };
 
   const handleMouseLeave = () => {
     setMagnifierPos({ x: -1, y: -1 });
   };
 
-  const handleClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    const color = getColor(e.nativeEvent.offsetX, e.nativeEvent.offsetY);
+  const handleClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    const color = getColor(x, y);
     onColorSelect(color);
-    setSelectedPos({ x: e.nativeEvent.offsetX, y: e.nativeEvent.offsetY });
+    setSelectedPos({ x, y });
   };
 
   return (
-    <div style={{ position: 'relative', display: 'inline-block' }}>
+    <div 
+      style={{ position: 'relative', display: 'inline-block' }}
+      onMouseMove={handleMouseMove}
+      onMouseLeave={handleMouseLeave}
+      onClick={handleClick}
+    >
       <canvas
         ref={canvasRef}
-        onClick={handleClick}
-        onMouseMove={handleMouseMove}
-        onMouseLeave={handleMouseLeave}
         style={{ maxWidth: '100%', height: 'auto', cursor: 'crosshair' }}
       />
       {magnifierPos.x !== -1 && (
@@ -89,9 +99,11 @@ const ImageColorDetector: React.FC<ImageColorDetectorProps> = ({ imageUrl, onCol
                   el.width = 100;
                   el.height = 100;
                   ctx.imageSmoothingEnabled = false;
+                  const scaleX = imageDimensions.width / mainCanvas.offsetWidth;
+                  const scaleY = imageDimensions.height / mainCanvas.offsetHeight;
                   ctx.drawImage(
                     mainCanvas,
-                    magnifierPos.x - 10, magnifierPos.y - 10, 20, 20,
+                    (magnifierPos.x * scaleX) - 10, (magnifierPos.y * scaleY) - 10, 20, 20,
                     0, 0, 100, 100
                   );
                 }
