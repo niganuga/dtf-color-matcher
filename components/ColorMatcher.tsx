@@ -1,11 +1,11 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
 import { Slider } from '@/components/ui/slider';
-import { rgbToCIELab, cieLab2rgb } from './utils/colorUtils';
+import * as ColorUtils from './utils/colorUtils';
 import { deltaE2000 } from './utils/deltaE';
 
 const ripSoftwarePresets = {
@@ -39,6 +39,41 @@ interface ColorSwatch {
 
 type ColorValue = number | '';
 
+const ImageColorDetector: React.FC<{ imageUrl: string; onColorSelect: (color: { r: number; g: number; b: number }) => void }> = ({ imageUrl, onColorSelect }) => {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext('2d');
+    if (canvas && ctx) {
+      const img = new Image();
+      img.src = imageUrl;
+      img.onload = () => {
+        canvas.width = img.width;
+        canvas.height = img.height;
+        ctx.drawImage(img, 0, 0);
+      };
+    }
+  }, [imageUrl]);
+
+  const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext('2d');
+    if (canvas && ctx) {
+      const rect = canvas.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      const imageData = ctx.getImageData(x, y, 1, 1);
+      const r = imageData.data[0];
+      const g = imageData.data[1];
+      const b = imageData.data[2];
+      onColorSelect({ r, g, b });
+    }
+  };
+
+  return <canvas ref={canvasRef} onClick={handleCanvasClick} style={{ maxWidth: '100%', height: 'auto' }} />;
+};
+
 const ColorMatcher: React.FC = () => {
   const [rgb, setRgb] = useState<{ r: ColorValue; g: ColorValue; b: ColorValue }>({ r: 255, g: 0, b: 0 });
   const [cmyk, setCmyk] = useState<{ c: ColorValue; m: ColorValue; y: ColorValue; k: ColorValue }>({ c: 0, m: 100, y: 100, k: 0 });
@@ -50,32 +85,7 @@ const ColorMatcher: React.FC = () => {
   const [customSettings, setCustomSettings] = useState('');
   const [colorSwatches, setColorSwatches] = useState<ColorSwatch[]>([]);
   const [nearestSwatches, setNearestSwatches] = useState<ColorSwatch[]>([]);
-
-  const rgbToCmyk = (r: number, g: number, b: number): [number, number, number, number] => {
-    r = r / 255;
-    g = g / 255;
-    b = b / 255;
-
-    let k = 1 - Math.max(r, g, b);
-    let c = k === 1 ? 0 : (1 - r - k) / (1 - k);
-    let m = k === 1 ? 0 : (1 - g - k) / (1 - k);
-    let y = k === 1 ? 0 : (1 - b - k) / (1 - k);
-
-    return [c * 100, m * 100, y * 100, k * 100];
-  };
-
-  const cmykToRgb = (c: number, m: number, y: number, k: number): [number, number, number] => {
-    c = c / 100;
-    m = m / 100;
-    y = y / 100;
-    k = k / 100;
-
-    let r = 255 * (1 - c) * (1 - k);
-    let g = 255 * (1 - m) * (1 - k);
-    let b = 255 * (1 - y) * (1 - k);
-
-    return [Math.round(r), Math.round(g), Math.round(b)];
-  };
+  const [uploadedImage, setUploadedImage] = useState<string | null>(null);
 
   useEffect(() => {
     const loadColorSwatches = async () => {
@@ -93,13 +103,13 @@ const ColorMatcher: React.FC = () => {
 
   const findNearestSwatches = useCallback(() => {
     if (colorSwatches.length === 0 || Object.values(rgb).some(value => value === '')) return;
-
-    const labColor = rgbToCIELab(Number(rgb.r), Number(rgb.g), Number(rgb.b));
+  
+    const labColor = ColorUtils.rgbToCIELab(Number(rgb.r), Number(rgb.g), Number(rgb.b));
     const swatchesWithDistance = colorSwatches.map(swatch => ({
       ...swatch,
-      distance: deltaE2000(labColor, rgbToCIELab(swatch.rgb[0], swatch.rgb[1], swatch.rgb[2]))
+      distance: deltaE2000(labColor, ColorUtils.rgbToCIELab(swatch.rgb[0], swatch.rgb[1], swatch.rgb[2]))
     }));
-
+  
     const sortedSwatches = swatchesWithDistance.sort((a, b) => a.distance - b.distance);
     setNearestSwatches(sortedSwatches.slice(0, 5));
     setColorName(sortedSwatches[0].name);
@@ -111,14 +121,14 @@ const ColorMatcher: React.FC = () => {
 
   useEffect(() => {
     if (Object.values(rgb).every(value => value !== '')) {
-      const [c, m, y, k] = rgbToCmyk(Number(rgb.r), Number(rgb.g), Number(rgb.b));
+      const [c, m, y, k] = ColorUtils.rgbToCmyk(Number(rgb.r), Number(rgb.g), Number(rgb.b));
       setCmyk({ c, m, y, k });
     }
   }, [rgb]);
-
+  
   useEffect(() => {
     if (Object.values(cmyk).every(value => value !== '')) {
-      const [r, g, b] = cmykToRgb(Number(cmyk.c), Number(cmyk.m), Number(cmyk.y), Number(cmyk.k));
+      const [r, g, b] = ColorUtils.cmykToRgb(Number(cmyk.c), Number(cmyk.m), Number(cmyk.y), Number(cmyk.k));
       setRgb({ r, g, b });
     }
   }, [cmyk]);
@@ -128,7 +138,7 @@ const ColorMatcher: React.FC = () => {
     if (value === '') {
       setRgb(prev => ({ ...prev, [name]: '' }));
     } else {
-      const newValue = Math.max(0, Math.min(255, parseInt(value) || 0));
+      const newValue = Math.round(Math.max(0, Math.min(255, parseInt(value) || 0)));
       setRgb(prev => ({ ...prev, [name]: newValue }));
     }
   };
@@ -138,7 +148,7 @@ const ColorMatcher: React.FC = () => {
     if (value === '') {
       setCmyk(prev => ({ ...prev, [name]: '' }));
     } else {
-      const newValue = Math.max(0, Math.min(100, parseFloat(value) || 0));
+      const newValue = Math.round(Math.max(0, Math.min(100, parseFloat(value) || 0)));
       setCmyk(prev => ({ ...prev, [name]: newValue }));
     }
   };
@@ -165,6 +175,17 @@ const ColorMatcher: React.FC = () => {
 
   const handleCustomSettingsChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setCustomSettings(e.target.value);
+  };
+
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        setUploadedImage(event.target?.result as string);
+      };
+      reader.readAsDataURL(file);
+    }
   };
 
   const handleConvert = () => {
@@ -298,13 +319,35 @@ const ColorMatcher: React.FC = () => {
                 type="text"
                 id={color}
                 name={color}
-                value={cmyk[color as keyof typeof cmyk]}
+                value={typeof cmyk[color as keyof typeof cmyk] === 'number' ? Math.round(cmyk[color as keyof typeof cmyk] as number) : cmyk[color as keyof typeof cmyk]}
                 onChange={handleCmykChange}
                 className="w-full border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
               />
             </div>
           ))}
         </div>
+
+        <div>
+          <Label htmlFor="imageUpload" className="block text-sm font-medium text-gray-700 mb-1">Upload Image for Color Detection</Label>
+          <Input
+            id="imageUpload"
+            type="file"
+            accept="image/*"
+            onChange={handleImageUpload}
+            className="w-full border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
+          />
+        </div>
+
+        {uploadedImage && (
+          <div>
+            <h3 className="text-lg font-semibold mb-2">Detect Colors from Image</h3>
+            <ImageColorDetector
+              imageUrl={uploadedImage}
+              onColorSelect={(color) => setRgb(color)}
+            />
+            <p className="text-sm mt-2">Click on the image to select a color</p>
+          </div>
+        )}
 
         {nearestSwatches.length > 0 && (
           <div className="mt-6">
